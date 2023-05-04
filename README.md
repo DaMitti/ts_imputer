@@ -35,3 +35,26 @@ Docstring:
     missing_values (optional): default=np.nan
     Value of missing values. If not np.nan, all values in df matching missing_values are replaced
     when calling transform method.
+
+Example use:
+    #1
+    df = read_some_data()
+    
+    imp = TimeSeriesImputer(
+        location_index='grid_index',
+        time_index=['year', context.resources.global_config['sub_year']],
+        method='bfill'
+    )
+    
+    df_imputed = imp.fit_transform(df)
+    
+    #2
+    pipe = Pipeline(
+        [('impute', imp),
+        ('model', RandomForestClassifier())]
+    )
+    X, y = df[features], df[target]
+    
+    pipe.fit(X, y)
+    
+    
