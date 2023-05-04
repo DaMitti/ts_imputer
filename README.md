@@ -41,8 +41,8 @@ Example use:
     df = read_some_data()
     
     imp = TimeSeriesImputer(
-        location_index='grid_index',
-        time_index=['year', context.resources.global_config['sub_year']],
+        location_index='location',
+        time_index=['year', 'month'],
         method='bfill'
     )
     
