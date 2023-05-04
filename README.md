@@ -37,6 +37,7 @@ Docstring:
     when calling transform method.
 
 Example use:
+
     #1
     df = read_some_data()
     
