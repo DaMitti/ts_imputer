@@ -39,7 +39,7 @@ Docstring:
 Example use:
 
     #1
-    df = read_some_data()
+    df = read_some_panel_data_with_missing_values()
     
     imp = TimeSeriesImputer(
         location_index='location',
