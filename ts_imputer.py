@@ -25,8 +25,9 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     available.
     'interpolate': Imputation using pandas interpolate. Needs at least 2 non-nan values.
 
-    interp_method: str, default='linear' --currently the only option supported
-    Interpolation method parameter to be passed for pandas.DataFrame.interpolate
+    interp_method: str, default='linear'
+    Interpolation method parameter to be passed for pandas.DataFrame.interpolate. Please note that the default option
+    does not support extrapolation, for this use e.g. 'slinear'
 
     interp_tails: str, [str], default='fill', possible values: ['fill', 'extrapolate']
     Fill behaviour for nan tails. Can either be a single string, which applies to both ends, or a list/tuple of length 2
@@ -70,7 +71,7 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             all_nan_cols = X.columns[X.isna().all()].tolist()
             raise ValueError(f'Cannot impute all-nan columns {all_nan_cols}.')
 
-        if (self.method == 'interpolate') and (X.isna().sum() == len(X)-1):
+        if (self.method == 'interpolate') and any(X.isna().sum() == len(X)-1):
             single_nan_cols = X.columns[X.isna().sum() == len(X)-1].tolist()
             raise ValueError(f'Cannot interpolate columns with only 1 non-nan value: {single_nan_cols}.')
 
@@ -91,7 +92,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             df = df.drop(columns=no_nan_cols)
 
             if self.time_index is not None:
-                sort_levels = [self.location_index] + list(dict.fromkeys(self.time_index))
+                time_index_list = [self.time_index] if type(self.time_index) is str else list(dict.fromkeys(self.time_index))
+                sort_levels = [self.location_index] + time_index_list
                 df = df.sort_index(level=sort_levels)
 
         return df
