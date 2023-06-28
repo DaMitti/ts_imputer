@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "scikit-learn>=1.2.2", "pandas>=2.0.2", "numpy>=1.24.3"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "tsimputer"
+version = "0.0.1"
+authors = [
+  { name="Daniel"},
+]
+description = "A small example package"
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
