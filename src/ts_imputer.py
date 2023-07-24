@@ -2,6 +2,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 import pandas as pd
 import numpy as np
+import warnings
 
 class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     '''
@@ -115,6 +116,16 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         return self
 
     def _local_fit_interpolate(self, df_loc, interp_method, interp_tails):
+        def get_fill_values():
+            if df_loc[col].isna().all():
+                message = f'All nan data for location <{df_loc.index.get_level_values(self.location_index).unique()}' \
+                          f'>, no interpolation possible.'
+                warnings.warn(message, UserWarning)
+                return (np.nan, np.nan)
+            else:
+                return (df_loc.loc[df_loc[col].first_valid_index(), col], df_loc.loc[df_loc[col].last_valid_index(), col])
+
+
         interp_cols = df_loc.columns[df_loc.isna().any()].tolist()
         loc_map = pd.DataFrame(index=df_loc.index)
 
@@ -122,8 +133,7 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
 
             if type(interp_tails) is str:
                 if interp_tails == 'fill':
-                    fill_value = (
-                    df_loc.loc[df_loc[col].first_valid_index(), col], df_loc.loc[df_loc[col].last_valid_index(), col])
+                    fill_value = get_fill_values()
                     loc_map[col] = df_loc.reset_index()[col].interpolate(
                         method=interp_method, limit_direction='both', fill_value=fill_value
                     ).values
@@ -134,8 +144,7 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
 
             else:
                 loc_map[col] = df_loc.reset_index()[col].interpolate(method=interp_method, limit_area='inside').values
-                fill_value = (
-                df_loc.loc[df_loc[col].first_valid_index(), col], df_loc.loc[df_loc[col].last_valid_index(), col])
+                fill_value = get_fill_values()
                 limit_direction = ('backward', 'forward')
                 for i in range(2):
                     if interp_tails[i] == 'fill':
