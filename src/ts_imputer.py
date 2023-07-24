@@ -118,8 +118,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     def _local_fit_interpolate(self, df_loc, interp_method, interp_tails):
         def get_fill_values():
             if df_loc[col].isna().all():
-                message = f'All nan data for location <{df_loc.index.get_level_values(self.location_index).unique()}' \
-                          f'>, no interpolation possible.'
+                message = f'All nan data for location <{df_loc.index.get_level_values(self.location_index)[0]}' \
+                          f'>, column <{col}>, no interpolation possible.'
                 warnings.warn(message, UserWarning)
                 return (np.nan, np.nan)
             else:

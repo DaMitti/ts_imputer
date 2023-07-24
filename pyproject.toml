@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tsimputer"
-version = "0.0.1"
+version = "0.0.2"
 authors = [
-  { name="Daniel"},
+  {name="Daniel"},
 ]
 description = "A small example package"
 readme = "README.md"
