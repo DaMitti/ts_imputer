@@ -30,7 +30,7 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     Interpolation method parameter to be passed for pandas.DataFrame.interpolate. Please note that the default option
     does not support extrapolation, for this use e.g. 'slinear'
 
-    interp_tails: str, [str], default='fill', possible values: ['fill', 'extrapolate']
+    tail_behavior: str, [str], default='fill', possible values: ['fill', 'None', 'extrapolate']
     Fill behaviour for nan tails. Can either be a single string, which applies to both ends, or a list/tuple of length 2
     for end-specific behavior.
     'fill': Fill with last non-nan value in the respective direction.
@@ -46,17 +46,17 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             self,
             location_index,
             time_index=None,
-            method='bfill',
+            imputation_method='bfill',
             interp_method='linear',
-            interp_tails='fill',
+            tail_behavior='fill',
             missing_values=np.nan
     ):
         self.location_index = location_index
         self.time_index = time_index
         self.missing_values = missing_values
-        self.method = method
+        self.imputation_method = imputation_method
         self.interp_method = interp_method
-        self.interp_tails = interp_tails
+        self.tail_behavior = tail_behavior
 
     def _validate_input(self, X, in_fit):
         # validity check
@@ -68,21 +68,31 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             else:
                 raise AssertionError("please pass a pandas DataFrame or Series")
         assert self.location_index in X.index.names
-        assert self.method in ['bfill', 'ffill', 'interpolate']
-        assert (type(self.interp_tails) is str) or (len(self.interp_tails) == 2)
+        assert self.imputation_method in ['bfill', 'ffill', 'interpolate']
+        assert (type(self.tail_behavior) is str) or (len(self.tail_behavior) == 2)
+        if len(self.tail_behavior) == 2:
+            assert all([tail in ['None', 'fill', 'extrapolate'] for tail in self.tail_behavior])
 
         if any(X.isna().all()):
             all_nan_cols = X.columns[X.isna().all()].tolist()
             raise ValueError(f'Cannot impute all-nan columns {all_nan_cols}.')
 
-        if (self.method == 'interpolate') and any(X.isna().sum() == len(X)-1):
+        if (self.imputation_method == 'interpolate') and any(X.isna().sum() == len(X)-1):
             single_nan_cols = X.columns[X.isna().sum() == len(X)-1].tolist()
             raise ValueError(f'Cannot interpolate columns with only 1 non-nan value: {single_nan_cols}.')
 
-        if (self.method == 'interpolate') and ('extrapolate' in self.interp_tails) and (self.interp_method == 'linear'):
-            raise ValueError(
-                'Extrapolation not possible with chosen interpolation method "linear". Only "fill" supported. For '
-                'linear extrapolation, please choose interp_method="slinear".'
+        if (self.imputation_method == 'interpolate') and (self.tail_behavior != 'fill') and (self.interp_method == 'linear'):
+            warnings.warn(
+                'Chosen interpolation method "linear" used with pandas.DataFrame.interpolate() leads to unexpected '
+                'results for tail behavior other than "fill". Using scipy.interpolate.interp1d\'s "slinear" '
+                'interpolation instead.'
+            )
+            self.interp_method = 'slinear'
+
+        if self.interp_method not in ['linear', 'slinear']:
+            warnings.warn(
+                'Class only tested for linear interpolation, please doublecheck whether imputation leads to desired '
+                'results.'
             )
 
         # process input
@@ -108,25 +118,30 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         update_maps = []
         for loc in df.index.get_level_values(self.location_index).unique():
             df_loc = df.xs(loc, level=self.location_index, drop_level=False)
-            if self.method == 'bfill':
+            if self.imputation_method == 'bfill':
                 loc_map = df_loc.bfill()
-            elif self.method == 'ffill':
+            elif self.imputation_method == 'ffill':
                 loc_map = df_loc.bfill().ffill()
-            elif self.method == 'interpolate':
-                loc_map = self._local_fit_interpolate(df_loc, self.interp_method, self.interp_tails)
+            elif self.imputation_method == 'interpolate':
+                loc_map = self._local_fit_interpolate(df_loc)
             update_maps.append(loc_map)
 
         update_map = pd.concat(update_maps)
         self.update_map_ = update_map
         return self
 
-    def _local_fit_interpolate(self, df_loc, interp_method, interp_tails):
+    def _local_fit_interpolate(self, df_loc):
         def get_fill_values():
             if df_loc[col].isna().all():
                 message = f'All nan data for location <{df_loc.index.get_level_values(self.location_index)[0]}' \
                           f'>, column <{col}>, no interpolation possible.'
                 warnings.warn(message, UserWarning)
                 return (np.nan, np.nan)
+            elif 'None' in self.tail_behavior:
+                if self.tail_behavior == 'None':
+                    return (np.nan, np.nan)
+                else:
+                    return tuple([np.nan if tail == 'None' else tail for tail in self.tail_behavior])
             else:
                 return (df_loc.loc[df_loc[col].first_valid_index(), col], df_loc.loc[df_loc[col].last_valid_index(), col])
 
@@ -136,29 +151,29 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
 
         for col in interp_cols:
 
-            if type(interp_tails) is str:
-                if interp_tails == 'fill':
+            if type(self.tail_behavior) is str:
+                if self.tail_behavior in ['fill', 'None']:
                     fill_value = get_fill_values()
                     loc_map[col] = df_loc.reset_index()[col].interpolate(
-                        method=interp_method, limit_direction='both', fill_value=fill_value
+                        method=self.interp_method, limit_direction='both', fill_value=fill_value
                     ).values
                 else:
                     loc_map[col] = df_loc.reset_index()[col].interpolate(
-                        method=interp_method, limit_direction='both', fill_value='extrapolate'
+                        method=self.interp_method, limit_direction='both', fill_value='extrapolate'
                     ).values
 
             else:
-                loc_map[col] = df_loc.reset_index()[col].interpolate(method=interp_method, limit_area='inside').values
+                loc_map[col] = df_loc.reset_index()[col].interpolate(method=self.interp_method, limit_area='inside').values
                 fill_value = get_fill_values()
                 limit_direction = ('backward', 'forward')
                 for i in range(2):
-                    if interp_tails[i] == 'fill':
+                    if self.tail_behavior[i] in ['fill', 'None']:
                         update_data = df_loc.reset_index()[col].interpolate(
-                            method=interp_method, limit_direction=limit_direction[i], fill_value=fill_value[i]
+                            method=self.interp_method, limit_direction=limit_direction[i], fill_value=fill_value[i]
                         ).values
                     else:
                         update_data = df_loc.reset_index()[col].interpolate(
-                            method=interp_method, limit_direction=limit_direction[i], fill_value='extrapolate'
+                            method=self.interp_method, limit_direction=limit_direction[i], fill_value='extrapolate'
                         ).values
                     update_series = pd.Series(index=loc_map.index, data=update_data, name=col)
                     loc_map.update(update_series, overwrite=False)
@@ -173,3 +188,4 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
 
         df.update(self.update_map_, overwrite=False)
         return df
+
