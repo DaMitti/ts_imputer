@@ -17,13 +17,13 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     Information the time component in the index, which is used to sort the data if provided. Make sure to either
     provide this or pass an already sorted dataframe.
 
-    method: str, default='bfill', possible values: ['bfill', 'interpolate']
+    method: str, default='bfill', possible values: ['bfill', 'ffill', 'interpolate']
     Imputation is performed on a location-by-location basis. For correct results, input df needs to be constructed with
     a time and a location index. Df either needs to be sorted by time or the time index needs to be passed to the
     imputer, so the imputation can be performed separately for each location.
     Available methods:
-    'bfill': Imputation using bfill where newer data is available combined with ffill where no data for backfilling is
-    available.
+    'bfill': Imputation using bfill where newer data is available. Leaves NA's after the most recent data in place.
+    'ffill': Combination of 'bfill' combined with ffill where no data for backfilling is available.
     'interpolate': Imputation using pandas interpolate. Needs at least 2 non-nan values.
 
     interp_method: str, default='linear'
@@ -46,8 +46,11 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             self,
             location_index,
             time_index=None,
-            method='bfill', interp_method='linear', interp_tails='fill',
-            missing_values=np.nan):
+            method='bfill',
+            interp_method='linear',
+            interp_tails='fill',
+            missing_values=np.nan
+    ):
         self.location_index = location_index
         self.time_index = time_index
         self.missing_values = missing_values
@@ -65,7 +68,7 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             else:
                 raise AssertionError("please pass a pandas DataFrame or Series")
         assert self.location_index in X.index.names
-        assert self.method in ['bfill', 'interpolate']
+        assert self.method in ['bfill', 'ffill', 'interpolate']
         assert (type(self.interp_tails) is str) or (len(self.interp_tails) == 2)
 
         if any(X.isna().all()):
@@ -106,6 +109,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         for loc in df.index.get_level_values(self.location_index).unique():
             df_loc = df.xs(loc, level=self.location_index, drop_level=False)
             if self.method == 'bfill':
+                loc_map = df_loc.bfill()
+            elif self.method == 'ffill':
                 loc_map = df_loc.bfill().ffill()
             elif self.method == 'interpolate':
                 loc_map = self._local_fit_interpolate(df_loc, self.interp_method, self.interp_tails)
