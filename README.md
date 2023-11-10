@@ -11,7 +11,7 @@ Example use:
     imp = TimeSeriesImputer(
         location_index='location',
         time_index=['year', 'month'],
-        method='bfill'
+        imputation_method='bfill'
     )
     
     df_imputed = imp.fit_transform(df)

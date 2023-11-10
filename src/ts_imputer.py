@@ -17,7 +17,7 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     Information the time component in the index, which is used to sort the data if provided. Make sure to either
     provide this or pass an already sorted dataframe.
 
-    method: str, default='bfill', possible values: ['bfill', 'ffill', 'interpolate']
+    imputation_method: str, default='bfill', possible values: ['bfill', 'ffill', 'interpolate']
     Imputation is performed on a location-by-location basis. For correct results, input df needs to be constructed with
     a time and a location index. Df either needs to be sorted by time or the time index needs to be passed to the
     imputer, so the imputation can be performed separately for each location.
@@ -26,11 +26,11 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     'ffill': Combination of 'bfill' combined with ffill where no data for backfilling is available.
     'interpolate': Imputation using pandas interpolate. Needs at least 2 non-nan values.
 
-    interp_method: str, default='linear'
-    Interpolation method parameter to be passed for pandas.DataFrame.interpolate. Please note that the default option
-    does not support extrapolation, for this use e.g. 'slinear'
+    interp_method: str
+    Interpolation method parameter to be passed for pandas.DataFrame.interpolate. Please note that only linear
+    interpolation is fully tested.
 
-    tail_behavior: str, [str], default='fill', possible values: ['fill', 'None', 'extrapolate']
+    tail_behavior: str, [str], possible values: ['fill', 'None', 'extrapolate']
     Fill behaviour for nan tails. Can either be a single string, which applies to both ends, or a list/tuple of length 2
     for end-specific behavior.
     'fill': Fill with last non-nan value in the respective direction.
@@ -47,8 +47,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             location_index,
             time_index=None,
             imputation_method='bfill',
-            interp_method='linear',
-            tail_behavior='fill',
+            interp_method=None,
+            tail_behavior=None,
             missing_values=np.nan
     ):
         self.location_index = location_index
@@ -76,6 +76,11 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         if any(X.isna().all()):
             all_nan_cols = X.columns[X.isna().all()].tolist()
             raise ValueError(f'Cannot impute all-nan columns {all_nan_cols}.')
+
+        if self.imputation_method != 'interpolate' and (self.interp_method is not None or self.tail_behavior is not None):
+            message = (f'interp_method and tail_behavior are only relevant for interpolation, not for chosen imputation'
+                       f'method <"{self.imputation_method}"> and therefore have no effect. ')
+            warnings.warn(message, UserWarning)
 
         if (self.imputation_method == 'interpolate') and any(X.isna().sum() == len(X)-1):
             single_nan_cols = X.columns[X.isna().sum() == len(X)-1].tolist()
@@ -132,26 +137,37 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
 
     def _local_fit_interpolate(self, df_loc):
         def get_fill_values():
-            if df_loc[col].isna().all():
-                message = f'All nan data for location <{df_loc.index.get_level_values(self.location_index)[0]}' \
-                          f'>, column <{col}>, no interpolation possible.'
-                warnings.warn(message, UserWarning)
-                return (np.nan, np.nan)
-            elif 'None' in self.tail_behavior:
+            fill_values = (
+                df_loc.loc[df_loc[col].first_valid_index(), col],
+                df_loc.loc[df_loc[col].last_valid_index(), col]
+            )
+            if 'None' in self.tail_behavior:
                 if self.tail_behavior == 'None':
-                    return (np.nan, np.nan)
+                    fill_values = (np.nan, np.nan)
                 else:
-                    return tuple([np.nan if tail == 'None' else tail for tail in self.tail_behavior])
+                    fill_values = tuple(
+                        [np.nan if tail == 'None'
+                         else tail if tail=='extrapolate'
+                         else fill_values[i] for i, tail in enumerate(self.tail_behavior)]
+                    )
+            return fill_values
+
+        def uniform_tails_fill():
+            # Fill performed in nested function to improve code readability
+            if (~df_loc[col].isna()).sum() == 1:
+                message = (
+                    f'Only 1 non-nan data point for location <{df_loc.index.get_level_values(self.location_index)[0]}'
+                    f'>, column <{col}>, imputation only performed via filling where tail behavior != "None".'
+                )
+                # if we want to fill/extrapolate in 1 direction but only have 1 value, we default to filling
+                # according to the specified tail behavior
+                if self.tail_behavior in ['fill', 'extrapolate']:
+                    loc_map[col] = df_loc[col].bfill().ffill()
+                else:
+                    # this is simply the same data without imputation
+                    loc_map[col] = df_loc[col]
+                warnings.warn(message, UserWarning)
             else:
-                return (df_loc.loc[df_loc[col].first_valid_index(), col], df_loc.loc[df_loc[col].last_valid_index(), col])
-
-
-        interp_cols = df_loc.columns[df_loc.isna().any()].tolist()
-        loc_map = pd.DataFrame(index=df_loc.index)
-
-        for col in interp_cols:
-
-            if type(self.tail_behavior) is str:
                 if self.tail_behavior in ['fill', 'None']:
                     fill_value = get_fill_values()
                     loc_map[col] = df_loc.reset_index()[col].interpolate(
@@ -161,10 +177,25 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
                     loc_map[col] = df_loc.reset_index()[col].interpolate(
                         method=self.interp_method, limit_direction='both', fill_value='extrapolate'
                     ).values
+            return
 
+        def different_tails_fill():
+            # Fill performed in nested function to improve code readability
+            if (~df_loc[col].isna()).sum() == 1:
+                message = (
+                    f'Only 1 non-nan data point for location <{df_loc.index.get_level_values(self.location_index)[0]}'
+                    f'>, column <{col}>, imputation performed via filling where tail behavior is not "None".'
+                )
+                df_temp = df_loc[col]
+                if self.tail_behavior[0] != 'None':
+                    df_temp = df_temp.bfill()
+                if self.tail_behavior[1] != 'None':
+                    df_temp = df_temp.ffill()
+                loc_map[col] = df_temp
+                warnings.warn(message, UserWarning)
             else:
-                loc_map[col] = df_loc.reset_index()[col].interpolate(method=self.interp_method, limit_area='inside').values
                 fill_value = get_fill_values()
+                loc_map[col] = df_loc.reset_index()[col].interpolate(method=self.interp_method, limit_area='inside').values
                 limit_direction = ('backward', 'forward')
                 for i in range(2):
                     if self.tail_behavior[i] in ['fill', 'None']:
@@ -177,7 +208,24 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
                         ).values
                     update_series = pd.Series(index=loc_map.index, data=update_data, name=col)
                     loc_map.update(update_series, overwrite=False)
+            return
 
+        interp_cols = df_loc.columns[df_loc.isna().any()].tolist()
+        loc_map = pd.DataFrame(index=df_loc.index)
+
+        for col in interp_cols:
+            # check if we can even interpolate (we need more than 1 non-nan value for location)
+            if df_loc[col].isna().all():
+                message = f'All nan data for location <{df_loc.index.get_level_values(self.location_index)[0]}' \
+                          f'>, column <{col}>, imputation locally not possible.'
+                warnings.warn(message, UserWarning)
+                # this is simply the all-nan data in this case
+                loc_map[col] = df_loc[col]
+            else:
+                if type(self.tail_behavior) is str:
+                    uniform_tails_fill()
+                else:
+                    different_tails_fill()
         return loc_map
 
     def transform(self, X, y=None):
@@ -188,4 +236,5 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
 
         df.update(self.update_map_, overwrite=False)
         return df
+
 
