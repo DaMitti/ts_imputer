@@ -22,8 +22,9 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     a time and a location index. Df either needs to be sorted by time or the time index needs to be passed to the
     imputer, so the imputation can be performed separately for each location.
     Available methods:
-    'bfill': Imputation using bfill where newer data is available. Leaves NA's after the most recent data in place.
-    'ffill': Combination of 'bfill' combined with ffill where no data for backfilling is available.
+    'bfill': Imputation using only bfill where newer data is available. Leaves NA's after the most recent data in place.
+    'ffill': Imputation using only ffill where older data is available. Leaves NA's before the earliest datapoint in place.
+    'fill_all': Combination of 'bfill' and ffill where no data for backfilling is available.
     'interpolate': Imputation using pandas interpolate. Needs at least 2 non-nan values.
 
     interp_method: str
@@ -68,10 +69,7 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             else:
                 raise AssertionError("please pass a pandas DataFrame or Series")
         assert self.location_index in X.index.names
-        assert self.imputation_method in ['bfill', 'ffill', 'interpolate']
-        assert (type(self.tail_behavior) is str) or (len(self.tail_behavior) == 2)
-        if len(self.tail_behavior) == 2:
-            assert all([tail in ['None', 'fill', 'extrapolate'] for tail in self.tail_behavior])
+        assert self.imputation_method in ['bfill', 'ffill', 'fill_all', 'interpolate']
 
         if any(X.isna().all()):
             all_nan_cols = X.columns[X.isna().all()].tolist()
@@ -82,23 +80,28 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
                        f'method <"{self.imputation_method}"> and therefore have no effect. ')
             warnings.warn(message, UserWarning)
 
-        if (self.imputation_method == 'interpolate') and any(X.isna().sum() == len(X)-1):
-            single_nan_cols = X.columns[X.isna().sum() == len(X)-1].tolist()
-            raise ValueError(f'Cannot interpolate columns with only 1 non-nan value: {single_nan_cols}.')
+        if self.imputation_method == 'interpolate':
+            assert (type(self.tail_behavior) is str) or (len(self.tail_behavior) == 2)
+            if len(self.tail_behavior) == 2:
+                assert all([tail in ['None', 'fill', 'extrapolate'] for tail in self.tail_behavior])
 
-        if (self.imputation_method == 'interpolate') and (self.tail_behavior != 'fill') and (self.interp_method == 'linear'):
-            warnings.warn(
-                'Chosen interpolation method "linear" used with pandas.DataFrame.interpolate() leads to unexpected '
-                'results for tail behavior other than "fill". Using scipy.interpolate.interp1d\'s "slinear" '
-                'interpolation instead.'
-            )
-            self.interp_method = 'slinear'
+            if any(X.isna().sum() == len(X)-1):
+                single_nan_cols = X.columns[X.isna().sum() == len(X)-1].tolist()
+                raise ValueError(f'Cannot interpolate columns with only 1 non-nan value: {single_nan_cols}.')
 
-        if self.interp_method not in ['linear', 'slinear']:
-            warnings.warn(
-                'Class only tested for linear interpolation, please doublecheck whether imputation leads to desired '
-                'results.'
-            )
+            if (self.tail_behavior != 'fill') and (self.interp_method == 'linear'):
+                warnings.warn(
+                    'Chosen interpolation method "linear" used with pandas.DataFrame.interpolate() leads to unexpected '
+                    'results for tail behavior other than "fill". Using scipy.interpolate.interp1d\'s "slinear" '
+                    'interpolation instead.'
+                )
+                self.interp_method = 'slinear'
+
+            if self.interp_method not in ['linear', 'slinear']:
+                warnings.warn(
+                    'Class only tested for linear interpolation, please doublecheck whether imputation leads to desired '
+                    'results.'
+                )
 
         # process input
         df = X.copy()
@@ -126,6 +129,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             if self.imputation_method == 'bfill':
                 loc_map = df_loc.bfill()
             elif self.imputation_method == 'ffill':
+                loc_map = df_loc.ffill()
+            elif self.imputation_method == 'fill_all':
                 loc_map = df_loc.bfill().ffill()
             elif self.imputation_method == 'interpolate':
                 loc_map = self._local_fit_interpolate(df_loc)
