@@ -103,13 +103,18 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
                     'results.'
                 )
 
-        # process input
-        df = X.copy()
-        if not np.isnan(self.missing_values):
-            df.replace(self.missing_values, np.nan)
-
-        # no need to process columns without na values when fitting
         if in_fit:
+            # just validate input, the actual work is done in transform
+            self.fit_checks_done_=True
+            return
+
+        else:
+            # process input
+            df = X.copy()
+            if not np.isnan(self.missing_values):
+                df.replace(self.missing_values, np.nan)
+
+            # no need to process columns without na values when fitting
             no_nan_cols = df.columns[(~df.isna()).all()].tolist()
             df = df.drop(columns=no_nan_cols)
 
@@ -118,11 +123,16 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
                 sort_levels = [self.location_index] + time_index_list
                 df = df.sort_index(level=sort_levels)
 
-        return df
+            return df
 
     def fit(self, X, y=None):
-        df = self._validate_input(X, in_fit=True)
+        """
+        only does input checks - actual imputation does not really require fit, only for sklearn structure
+        """
+        self._validate_input(X, in_fit=True)
+        return self
 
+    def _get_update_map(self, df):
         update_maps = []
         for loc in df.index.get_level_values(self.location_index).unique():
             df_loc = df.xs(loc, level=self.location_index, drop_level=False)
@@ -135,10 +145,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             elif self.imputation_method == 'interpolate':
                 loc_map = self._local_fit_interpolate(df_loc)
             update_maps.append(loc_map)
-
         update_map = pd.concat(update_maps)
-        self.update_map_ = update_map
-        return self
+        return update_map
 
     def _local_fit_interpolate(self, df_loc):
         def get_fill_values():
@@ -235,11 +243,12 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
 
     def transform(self, X, y=None):
         # make sure that the imputer was fitted
-        check_is_fitted(self, 'update_map_')
+        check_is_fitted(self, 'fit_checks_done_')
 
         df = self._validate_input(X, in_fit=False)
+        update_map = self._get_update_map(df)
 
-        df.update(self.update_map_, overwrite=False)
+        df.update(update_map, overwrite=False)
         return df
 
 
