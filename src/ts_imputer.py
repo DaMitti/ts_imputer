@@ -1,3 +1,5 @@
+from typing import Literal
+
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 import pandas as pd
@@ -50,7 +52,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             imputation_method='bfill',
             interp_method=None,
             tail_behavior=None,
-            missing_values=np.nan
+            missing_values=np.nan,
+            all_nan_policy:Literal['drop', 'error']='drop'
     ):
         self.location_index = location_index
         self.time_index = time_index
@@ -58,6 +61,7 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         self.imputation_method = imputation_method
         self.interp_method = interp_method
         self.tail_behavior = tail_behavior
+        self.all_nan_policy = all_nan_policy
 
     def _validate_input(self, X, in_fit):
         # validity check
@@ -71,9 +75,10 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         assert self.location_index in X.index.names
         assert self.imputation_method in ['bfill', 'ffill', 'fill_all', 'interpolate']
 
-        if any(X.isna().all()):
+        if any(X.replace(self.missing_values, np.nan).isna().all()):
             all_nan_cols = X.columns[X.isna().all()].tolist()
-            raise ValueError(f'Cannot impute all-nan columns {all_nan_cols}.')
+            if self.all_nan_policy == 'error':
+                raise ValueError(f'Cannot impute all-nan columns {all_nan_cols}. Set all_nan_policy="drop" to drop columns.')
 
         if self.imputation_method != 'interpolate' and (self.interp_method is not None or self.tail_behavior is not None):
             message = (f'interp_method and tail_behavior are only relevant for interpolation, not for chosen imputation'
@@ -113,6 +118,9 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             df = X.copy()
             if not np.isnan(self.missing_values):
                 df.replace(self.missing_values, np.nan)
+
+            if self.all_nan_policy == 'drop':
+                df = df.drop(columns=all_nan_cols)
 
             if self.time_index is not None:
                 time_index_list = [self.time_index] if type(self.time_index) is str else list(dict.fromkeys(self.time_index))
