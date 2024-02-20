@@ -114,10 +114,6 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             if not np.isnan(self.missing_values):
                 df.replace(self.missing_values, np.nan)
 
-            # no need to process columns without na values when fitting
-            no_nan_cols = df.columns[(~df.isna()).all()].tolist()
-            df = df.drop(columns=no_nan_cols)
-
             if self.time_index is not None:
                 time_index_list = [self.time_index] if type(self.time_index) is str else list(dict.fromkeys(self.time_index))
                 sort_levels = [self.location_index] + time_index_list
@@ -133,6 +129,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         return self
 
     def _get_update_map(self, df):
+        if not df.isna().any().any():
+            return df
         update_maps = []
         for loc in df.index.get_level_values(self.location_index).unique():
             df_loc = df.xs(loc, level=self.location_index, drop_level=False)
