@@ -1,5 +1,5 @@
 from typing import Literal
-
+from joblib import Parallel, delayed
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 import pandas as pd
@@ -53,7 +53,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             interp_method=None,
             tail_behavior=None,
             missing_values=np.nan,
-            all_nan_policy:Literal['drop', 'error']='drop'
+            all_nan_policy:Literal['drop', 'error']='drop',
+            n_jobs=10
     ):
         self.location_index = location_index
         self.time_index = time_index
@@ -61,7 +62,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         self.imputation_method = imputation_method
         self.interp_method = interp_method
         self.tail_behavior = tail_behavior
-        self.all_nan_policy = all_nan_policy
+        self.all_nan_policy = all_nan_policy,
+        self.n_jobs = n_jobs
 
     def _validate_input(self, X, in_fit):
         # validity check
@@ -140,20 +142,23 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     def _get_update_map(self, df):
         if not df.isna().any().any():
             return df
-        update_maps = []
-        for loc in df.index.get_level_values(self.location_index).unique():
-            df_loc = df.xs(loc, level=self.location_index, drop_level=False)
-            if self.imputation_method == 'bfill':
-                loc_map = df_loc.bfill()
-            elif self.imputation_method == 'ffill':
-                loc_map = df_loc.ffill()
-            elif self.imputation_method == 'fill_all':
-                loc_map = df_loc.bfill().ffill()
-            elif self.imputation_method == 'interpolate':
-                loc_map = self._local_fit_interpolate(df_loc)
-            update_maps.append(loc_map)
+        update_maps = Parallel(n_jobs=self.n_jobs, verbose=1)(
+            delayed(self._parallel_interpolate)(df, loc) for loc in df.index.get_level_values(self.location_index).unique()
+        )
         update_map = pd.concat(update_maps)
         return update_map
+
+    def _parallel_interpolate(self, df, loc):
+        df_loc = df.xs(loc, level=self.location_index, drop_level=False)
+        if self.imputation_method == 'bfill':
+            loc_map = df_loc.bfill()
+        elif self.imputation_method == 'ffill':
+            loc_map = df_loc.ffill()
+        elif self.imputation_method == 'fill_all':
+            loc_map = df_loc.bfill().ffill()
+        elif self.imputation_method == 'interpolate':
+            loc_map = self._local_fit_interpolate(df_loc)
+        return loc_map
 
     def _local_fit_interpolate(self, df_loc):
         def get_fill_values():
@@ -175,10 +180,10 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         def uniform_tails_fill():
             # Fill performed in nested function to improve code readability
             if (~df_loc[col].isna()).sum() == 1:
-                message = (
-                    f'Only 1 non-nan data point for location <{df_loc.index.get_level_values(self.location_index)[0]}'
-                    f'>, column <{col}>, imputation only performed via filling where tail behavior != "None".'
-                )
+                # message = (
+                #     f'Only 1 non-nan data point for location <{df_loc.index.get_level_values(self.location_index)[0]}'
+                #     f'>, column <{col}>, imputation only performed via filling where tail behavior != "None".'
+                # )
                 # if we want to fill/extrapolate in 1 direction but only have 1 value, we default to filling
                 # according to the specified tail behavior
                 if self.tail_behavior in ['fill', 'extrapolate']:
@@ -186,7 +191,7 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
                 else:
                     # this is simply the same data without imputation
                     loc_map[col] = df_loc[col]
-                warnings.warn(message, UserWarning)
+                # warnings.warn(message, UserWarning)
             else:
                 if self.tail_behavior in ['fill', 'None']:
                     fill_value = get_fill_values()
@@ -202,17 +207,17 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         def different_tails_fill():
             # Fill performed in nested function to improve code readability
             if (~df_loc[col].isna()).sum() == 1:
-                message = (
-                    f'Only 1 non-nan data point for location <{df_loc.index.get_level_values(self.location_index)[0]}'
-                    f'>, column <{col}>, imputation performed via filling where tail behavior is not "None".'
-                )
+                # message = (
+                #     f'Only 1 non-nan data point for location <{df_loc.index.get_level_values(self.location_index)[0]}'
+                #     f'>, column <{col}>, imputation performed via filling where tail behavior is not "None".'
+                # )
                 df_temp = df_loc[col]
                 if self.tail_behavior[0] != 'None':
                     df_temp = df_temp.bfill()
                 if self.tail_behavior[1] != 'None':
                     df_temp = df_temp.ffill()
                 loc_map[col] = df_temp
-                warnings.warn(message, UserWarning)
+                # warnings.warn(message, UserWarning)
             else:
                 fill_value = get_fill_values()
                 loc_map[col] = df_loc.reset_index()[col].interpolate(method=self.interp_method, limit_area='inside').values
@@ -236,9 +241,9 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         for col in interp_cols:
             # check if we can even interpolate (we need more than 1 non-nan value for location)
             if df_loc[col].isna().all():
-                message = f'All nan data for location <{df_loc.index.get_level_values(self.location_index)[0]}' \
-                          f'>, column <{col}>, imputation locally not possible.'
-                warnings.warn(message, UserWarning)
+                # message = f'All nan data for location <{df_loc.index.get_level_values(self.location_index)[0]}' \
+                #           f'>, column <{col}>, imputation locally not possible.'
+                # warnings.warn(message, UserWarning)
                 # this is simply the all-nan data in this case
                 loc_map[col] = df_loc[col]
             else:

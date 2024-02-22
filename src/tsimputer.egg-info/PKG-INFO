@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: tsimputer
-Version: 0.5.1
+Version: 0.6.0
 Summary: A small sklearn compatible imputer for time series data.
 Author: Daniel
 Classifier: Programming Language :: Python :: 3
