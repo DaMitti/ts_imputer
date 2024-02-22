@@ -119,7 +119,8 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             if not np.isnan(self.missing_values):
                 df.replace(self.missing_values, np.nan)
 
-            if self.all_nan_policy == 'drop':
+            if any(df.isna().all()) and self.all_nan_policy == 'drop':
+                all_nan_cols = df.columns[df.isna().all()].tolist()
                 df = df.drop(columns=all_nan_cols)
 
             if self.time_index is not None:
