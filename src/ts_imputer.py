@@ -13,36 +13,45 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     Parameters
     ----------
     location_index: str
-    name of the index with the location information
+        name of the index with the location information
 
-    time_index (optional): str, [str], default=None
-    Information the time component in the index, which is used to sort the data if provided. Make sure to either
-    provide this or pass an already sorted dataframe.
+    time_index (optional): str|[str], default=None
+        Information the time component in the index, which is used to sort the data if provided. Make sure to either
+        provide this or pass an already sorted dataframe. Accepts lists for multi-indices
 
     imputation_method: str, default='bfill', possible values: ['bfill', 'ffill', 'interpolate']
-    Imputation is performed on a location-by-location basis. For correct results, input df needs to be constructed with
-    a time and a location index. Df either needs to be sorted by time or the time index needs to be passed to the
-    imputer, so the imputation can be performed separately for each location.
-    Available methods:
-    'bfill': Imputation using only bfill where newer data is available. Leaves NA's after the most recent data in place.
-    'ffill': Imputation using only ffill where older data is available. Leaves NA's before the earliest datapoint in place.
-    'fill_all': Combination of 'bfill' and ffill where no data for backfilling is available.
-    'interpolate': Imputation using pandas interpolate. Needs at least 2 non-nan values.
+        Imputation is performed on a location-by-location basis. For correct results, input df needs to be constructed
+        with a time and a location index. Df either needs to be sorted by time or the time index needs to be passed to
+        the imputer, so the imputation can be performed separately for each location.
+
+        Available options:
+        'bfill': Imputation using only bfill where newer data is available. Leaves NA's after the most recent data in
+                 place.
+        'ffill': Imputation using only ffill where older data is available. Leaves NA's before the earliest datapoint in
+                 place.
+        'fill_all': Combination of 'bfill' and ffill where no data for backfilling is available.
+        'interpolate': Imputation using pandas interpolate. Needs at least 2 non-nan values.
 
     interp_method: str
-    Interpolation method parameter to be passed for pandas.DataFrame.interpolate. Please note that only linear
-    interpolation is fully tested.
+        Interpolation method parameter to be passed for pandas.DataFrame.interpolate. Please note that only linear
+        interpolation is fully tested.
 
     tail_behavior: str, [str], possible values: ['fill', 'None', 'extrapolate']
-    Fill behaviour for nan tails. Can either be a single string, which applies to both ends, or a list/tuple of length 2
-    for end-specific behavior.
-    'fill': Fill with last non-nan value in the respective direction.
-    'extrapolate': Extrapolate from given observations according to the chosen interpolation method.
+        Fill behaviour for nan tails. Can either be a single string, which applies to both ends, or a list/tuple of
+        length 2 for end-specific behavior.
 
-    missing_values (optional): default=np.nan
-    Value of missing values. If not np.nan, all values in df matching missing_values are replaced
-    when calling transform method.
+        'fill': Fill with last non-nan value in the respective direction.
+        'extrapolate': Extrapolate from given observations according to the chosen interpolation method.
 
+    missing_values: default=np.nan
+        Value of missing values. If not np.nan, all values in df matching missing_values are replaced
+        when calling transform method.
+
+    all_nan_policy: str, default='drop', possible values: ['drop', 'error']
+        Whether to drop columns with all-nan values and proceed with imputation or raise an error instead.
+
+    n_jobs: int, default=1
+        n_jobs to be passed to joblib.Parallel parallelization logic
     '''
 
     def __init__(
