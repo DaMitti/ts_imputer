@@ -54,7 +54,7 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
             tail_behavior=None,
             missing_values=np.nan,
             all_nan_policy:Literal['drop', 'error']='drop',
-            n_jobs=10
+            n_jobs=1
     ):
         self.location_index = location_index
         self.time_index = time_index
