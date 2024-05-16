@@ -1,10 +1,13 @@
-from typing import Literal
+from typing import Literal, List
 from joblib import Parallel, delayed
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 import pandas as pd
 import numpy as np
 import warnings
+
+from tqdm import tqdm
+
 
 class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     '''
@@ -43,27 +46,31 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         'fill': Fill with last non-nan value in the respective direction.
         'extrapolate': Extrapolate from given observations according to the chosen interpolation method.
 
-    missing_values: default=np.nan
+    missing_values: float|int default=np.nan
         Value of missing values. If not np.nan, all values in df matching missing_values are replaced
         when calling transform method.
 
     all_nan_policy: str, default='drop', possible values: ['drop', 'error']
         Whether to drop columns with all-nan values and proceed with imputation or raise an error instead.
 
-    n_jobs: int, default=1
-        n_jobs to be passed to joblib.Parallel parallelization logic
+    parallelize: bool, default=True
+        Whether to use parallelization with joblib Parallel.
+
+    parallel_kwargs: dict, default=None
+        Dictionary with kwargs to be passed to joblibs Parallel.
     '''
 
     def __init__(
             self,
-            location_index,
-            time_index=None,
-            imputation_method='bfill',
-            interp_method=None,
-            tail_behavior=None,
-            missing_values=np.nan,
-            all_nan_policy:Literal['drop', 'error']='drop',
-            n_jobs=1
+            location_index: str,
+            time_index: str|List[str] = None,
+            imputation_method: str = 'bfill',
+            interp_method: str = None,
+            tail_behavior: str|List[str] = None,
+            missing_values: float|int = np.nan,
+            all_nan_policy: Literal['drop', 'error'] = 'drop',
+            parallelize: bool = True,
+            parallel_kwargs: dict = None
     ):
         self.location_index = location_index
         self.time_index = time_index
@@ -71,8 +78,11 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
         self.imputation_method = imputation_method
         self.interp_method = interp_method
         self.tail_behavior = tail_behavior
-        self.all_nan_policy = all_nan_policy,
-        self.n_jobs = n_jobs
+        self.all_nan_policy = all_nan_policy
+        self.parallelize = parallelize
+        if parallel_kwargs is None:
+            parallel_kwargs = {}
+        self.parallel_kwargs = parallel_kwargs
 
     def _validate_input(self, X, in_fit):
         # validity check
@@ -151,9 +161,15 @@ class TimeSeriesImputer(BaseEstimator, TransformerMixin):
     def _get_update_map(self, df):
         if not df.isna().any().any():
             return df
-        update_maps = Parallel(n_jobs=self.n_jobs, verbose=1)(
-            delayed(self._parallel_interpolate)(df, loc) for loc in df.index.get_level_values(self.location_index).unique()
-        )
+        df = df.sort_index()
+        if self.parallelize:
+            update_maps = Parallel(**self.parallel_kwargs)(
+                delayed(self._parallel_interpolate)(df, loc)
+                for loc in df.index.get_level_values(self.location_index).unique()
+            )
+        else:
+            update_maps = [self._parallel_interpolate(df, loc)
+                           for loc in tqdm(df.index.get_level_values(self.location_index).unique())]
         update_map = pd.concat(update_maps)
         return update_map
 
